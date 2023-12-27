@@ -1,0 +1,375 @@
+﻿@page "/"
+@inject HttpClient Http
+
+<MudContainer MaxWidth="MaxWidth.ExtraLarge" Class="mt-16">
+    <MudPaper Class="pa-1 ma-1">
+        <MudText Typo="Typo.h3">Mino Dice Calculator</MudText>
+
+        <MudPaper Class="pa-4 ma-2">
+            <MudText>Number of Players: </MudText>
+            <MudRadioGroup T="int" ValueChanged="OnNumberPlayerChanged" Value="numberPlayer">
+                <MudRadio Color="Color.Primary" Value="3">3</MudRadio>
+                <MudRadio Color="Color.Primary" Value="4">4</MudRadio>
+                <MudRadio Color="Color.Primary" Value="5">5</MudRadio>
+                <MudRadio Color="Color.Primary" Value="6">6</MudRadio>
+            </MudRadioGroup>
+
+            <MudText>Round: </MudText>
+            <MudRadioGroup T="int" ValueChanged="OnRoundNumberChanged" Value="roundNumber">
+                <MudRadio Color="Color.Primary" Value="1">1st</MudRadio>
+                <MudRadio Color="Color.Primary" Value="2">2nd</MudRadio>
+                <MudRadio Color="Color.Primary" Value="3">3rd</MudRadio>
+                <MudRadio Color="Color.Primary" Value="4">4th</MudRadio>
+                <MudRadio Color="Color.Primary" Value="5">5th</MudRadio>
+                <MudRadio Color="Color.Primary" Value="6">6th</MudRadio>
+                <MudRadio Color="Color.Primary" Value="7" Disabled="@isRoundSevenButtonDisabled">7th</MudRadio>
+                <MudRadio Color="Color.Primary" Value="8" Disabled="@isRoundEightButtonDisabled">8th</MudRadio>
+            </MudRadioGroup>
+
+            <MudText>Order: </MudText>
+            <MudRadioGroup T="int" Value="order">
+                @foreach (var index in Enumerable.Range(0, numberPlayer))
+                {
+                    <MudRadio Color="Color.Primary" Value="@(index)">@(index + 1)</MudRadio>
+                }
+            </MudRadioGroup>
+
+            <MudNumericField Class="py-1" @bind-Value="numberExpr" Label="Number of Experiments" Variant="Variant.Outlined" Step="100" />
+
+            @foreach (var index in Enumerable.Range(0, ownDices.Count))
+            {
+                <MudSelect T="string" Label=@($"Select for Dice {index+1}") @bind-Value="ownDices[index]">
+                    <MudSelectItem Value=@("Minotaur")>Minotaur Dice</MudSelectItem>
+                    <MudSelectItem Value=@("Griffin")>Griffin Dice</MudSelectItem>
+                    <MudSelectItem Value=@("Mermaid")>Mermaid Dice</MudSelectItem>
+                    <MudSelectItem Value=@("Red")>Red Dice</MudSelectItem>
+                    <MudSelectItem Value=@("Yellow")>Yellow Dice</MudSelectItem>
+                    <MudSelectItem Value=@("Purple")>Purple Dice</MudSelectItem>
+                    <MudSelectItem Value=@("Gray")>Gray Dice</MudSelectItem>
+                </MudSelect>
+            }
+
+            <MudButton class="py-2 mt-3" Disabled="@minoSimu" OnClick="RunMinoSimu" Color="Color.Primary" Variant="Variant.Filled">
+                @if (minoSimu)
+                {
+                    <MudProgressCircular Class="ms-n1" Size="Size.Small" Indeterminate="true" />
+                    <MudText Class="ms-2">Processing</MudText>
+                }
+                else
+                {
+                    <MudText>Run Simulation</MudText>
+                }
+
+            </MudButton>
+        </MudPaper>
+    
+        <MudPaper Class="pa-4 ma-2">
+            <MudText Typo="Typo.subtitle1">Probability Simulation Results:</MudText>
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <MudText Color="Color.Error">@errorMessage</MudText>
+            }
+            @if (isSimuFinished)
+            {
+                <MudChart ChartType="ChartType.Bar" ChartSeries="@winningDiceCountSeries" XAxisLabels="@winningDiceCountLabels.ToArray()" Width="100%" Height="350px"></MudChart>
+            }
+        </MudPaper>
+
+    </MudPaper>
+</MudContainer>
+
+@code {
+    private string errorMessage = "";
+    private int numberPlayer = 3;
+    private int roundNumber = 1;
+    private int order = 0;
+    private bool isRoundSevenButtonDisabled = false;
+    private bool isRoundEightButtonDisabled = false;
+    private int numberExpr = 50000;
+    private bool minoSimu = false;
+    private bool isSimuFinished = false;
+    private List<string> ownDices = new List<string>() { "" };
+
+    Dictionary<string, int> defaultBag = new Dictionary<string, int>() { { "Minotaur", 1 }, { "Griffin", 3 }, { "Mermaid", 2 }, { "Red", 7 }, { "Yellow", 7 }, { "Purple", 8 }, { "Gray", 8 } };
+    private Dictionary<string, int> bag = new Dictionary<string, int> { };
+    private Dictionary<int, List<string>> players = new Dictionary<int, List<string>> { };
+
+    public List<ChartSeries> winningDiceCountSeries = new List<ChartSeries>() { };
+    public List<string> winningDiceCountLabels = new List<string> { };
+
+    private void SetNumberPlayer(int number)
+    {
+        numberPlayer = number;
+        if (numberPlayer >= 5)
+        {
+            isRoundEightButtonDisabled = true;
+        } else
+        {
+            isRoundEightButtonDisabled = false;
+        }
+
+        if (numberPlayer == 6)
+        {
+            isRoundSevenButtonDisabled = true;
+        } else
+        {
+            isRoundSevenButtonDisabled = false;
+        }
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnNumberPlayerChanged(int newValue)
+    {
+        SetNumberPlayer(newValue);
+    }
+
+    private void SetRoundNumber(int number)
+    {
+        roundNumber = number;
+        UpdateDiceSelect();
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnRoundNumberChanged(int newValue)
+    {
+        SetRoundNumber(newValue);
+    }
+
+    private void UpdateDiceSelect()
+    {
+        while (ownDices.Count < roundNumber)
+        {
+            ownDices.Add(string.Empty);
+        }
+        while (ownDices.Count > roundNumber)
+        {
+            ownDices.RemoveAt(ownDices.Count - 1);
+        }
+    }
+
+    private async Task RunMinoSimu()
+    {
+        minoSimu = true;
+        isSimuFinished = false;
+        errorMessage = "";
+        foreach (var dice in ownDices)
+        {
+            if (dice == "")
+            {
+                errorMessage = "Dices must be selected.";
+            }
+        }
+
+        bag = initializeBag(ownDices);
+        foreach (var entry in bag)
+        {
+            if (entry.Value < 0)
+            {
+                errorMessage = $"The number of {entry.Key} Dice must be less than {defaultBag[entry.Key]}";
+            }
+        }
+
+        if (errorMessage.Length == 0)
+        {
+            winningDiceCountSeries.Clear();
+            winningDiceCountLabels.Clear();
+
+            Dictionary<int, int> winCountDict = new Dictionary<int, int>() { };
+            for (var idx = 0; idx <= roundNumber; idx++)
+            {
+                winCountDict[idx] = 0;
+            }
+
+            for (int i = 0; i < numberExpr; i++)
+            {
+                bag = initializeBag(ownDices);
+                players = inializePlayer(order, ownDices, bag);
+                addWinCountDict(winCountDict, order, players);
+            }
+
+            winningDiceCountLabels = new List<string>(winCountDict.Keys.ToList().Select(x => x.ToString()));
+            winningDiceCountSeries.Add(new ChartSeries() { Name = "Probability of Winning Dices", Data = winCountDict.Values.Select(x => (double) x).ToArray() });
+
+            await Task.Delay(2000);
+            isSimuFinished = true;
+        }
+        minoSimu = false;
+    }
+
+    private Dictionary<string, int> initializeBag(List<string> dices)
+    {
+        Dictionary<string, int> bag = new Dictionary<string, int>(defaultBag);
+        foreach (var dice in dices)
+        {
+            bag[dice] -= 1;
+        }
+        return bag;
+    }
+
+    private Dictionary<int, List<string>> inializePlayer(int order, List<string> dices, Dictionary<string, int> bag)
+    {
+        List<string> DiceList = new List<string>(bag.Keys);
+        Random rnd = new Random();
+        int selectedDiceIndex;
+        Dictionary<int, List<string>> players = new Dictionary<int, List<string>>() { };
+        for (int i = 0; i < numberPlayer; i++)
+        {
+            if (i == order)
+            {
+                players[i] = new List<string>(dices);
+            } else
+            {
+                players[i] = new List<string>() { };
+                for (int j = 0; j < roundNumber; j++)
+                {
+                    while (true)
+                    {
+                        selectedDiceIndex = rnd.Next() % 7;
+                        if (bag[DiceList[selectedDiceIndex]] > 0)
+                        {
+                            players[i].Add(DiceList[selectedDiceIndex]);
+                            bag[DiceList[selectedDiceIndex]] -= 1;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        return players;
+    }
+
+    private void addWinCountDict(Dictionary<int, int> winCountDict, int order, Dictionary<int, List<string>> players)
+    {
+        Random rnd = new Random();
+        int winCount = 0;
+        int firstPlayer = 0;
+        int firstPlayerSelectedDiceIndex = rnd.Next() % roundNumber;
+        string leadingDice = players[0][firstPlayerSelectedDiceIndex];
+        players[0].RemoveAt(firstPlayerSelectedDiceIndex);
+        List<string> dices = new List<string>() { };
+
+        for (int j = 0; j < roundNumber; j++)
+        {
+            dices.Clear();
+            for (int i = 0; i < numberPlayer; i++)
+            {
+                if (i != firstPlayer)
+                {
+                    dices.Add(chooseDice(players[i], leadingDice));
+                } else
+                {
+                    dices.Add(leadingDice);
+                }
+            }
+
+            firstPlayer = getRoundWinner(winCountDict, order, dices, firstPlayer);
+            if (firstPlayer == order)
+            {
+                winCount += 1;
+            }
+
+            if (players[firstPlayer].Count == 0)
+            {
+                break;
+            }
+
+            firstPlayerSelectedDiceIndex = rnd.Next() % players[firstPlayer].Count;
+            leadingDice = players[firstPlayer][firstPlayerSelectedDiceIndex];
+            players[firstPlayer].RemoveAt(firstPlayerSelectedDiceIndex);
+        }
+
+        winCountDict[winCount] += 1;
+    }
+
+    private string chooseDice(List<string> playerDices, string leadingDice)
+    {
+        Random rnd = new Random();
+        int selectedDiceIndex = -1;
+        for (int j = 0; j < playerDices.Count; j++)
+        {
+            if (playerDices[j] == leadingDice)
+            {
+                selectedDiceIndex = j;
+                break;
+            }
+        }
+
+        if (selectedDiceIndex == -1) 
+        {
+            selectedDiceIndex = rnd.Next() % playerDices.Count;
+        }
+        string selectedDice = playerDices[selectedDiceIndex];
+        playerDices.RemoveAt(selectedDiceIndex);
+        return selectedDice;
+    }
+
+    private int getRoundWinner(Dictionary<int, int> winCountDict, int order, List<string> roundDices, int firstRollPlayer)
+    {
+        int winner = firstRollPlayer;
+        int curMaxDiceSide = rollDice(roundDices[firstRollPlayer]);
+        bool contains98 = curMaxDiceSide == 98;
+        bool contains99 = curMaxDiceSide == 99;
+        int newDiceSide;
+        foreach (int idx in Enumerable.Range(0, roundDices.Count))
+        {
+            if (idx != firstRollPlayer)
+            {
+                newDiceSide = rollDice(roundDices[idx]);
+                contains98 = contains98 || (newDiceSide == 98);
+                contains99 = contains99 || (newDiceSide == 99);
+
+                if ((newDiceSide == 97) && (curMaxDiceSide == 99))
+                {
+                    curMaxDiceSide = 97;
+                    winner = idx;
+                }
+                else if ((newDiceSide == 98) && (curMaxDiceSide == 97) && !contains99)
+                {
+                    newDiceSide = 98;
+                    winner = idx;
+                }
+                else if (newDiceSide > curMaxDiceSide)
+                {
+                    newDiceSide = curMaxDiceSide;
+                    winner = idx;
+                }
+            }
+        }
+
+        return winner;
+    }
+
+    private int rollDice(string diceName)
+    {
+        List<int> diceSideList;
+        switch (diceName)
+        {
+            case "Minotaur":
+                diceSideList = new List<int>() { 99, 99, 99, 99, 0, 0 };
+                break;
+            case "Griffin":
+                diceSideList = new List<int>() { 98, 98, 98, 98, 0, 0 };
+                break;
+            case "Mermaid":
+                diceSideList = new List<int>() { 97, 97, 97, 97, 0, 0 };
+                break;
+            case "Red":
+                diceSideList = new List<int>() { 7, 7, 6, 6, 5, 5 };
+                break;
+            case "Yellow":
+                diceSideList = new List<int>() { 5, 5, 4, 4, 3, 3 };
+                break;
+            case "Purple":
+                diceSideList = new List<int>() { 3, 3, 2, 2, 1, 1 };
+                break;
+            default:
+                diceSideList = new List<int>() { 7, 1, 1, 0, 0, 0 };
+                break;
+        }
+
+        Random rnd = new Random();
+        int selectedDiceSideIndex = rnd.Next() % 6;
+        return diceSideList[selectedDiceSideIndex];
+    }
+
+}
